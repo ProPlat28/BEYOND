@@ -11,7 +11,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-linux:
+    name: Linux
     runs-on: ubuntu-latest
 
     steps:
@@ -54,9 +55,82 @@ jobs:
           name: Linux
           path: Linux.zip
 
+  build-windows:
+    name: Windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+
+          Copy-Item build/out/Release/beyond.exe dist/
+          if (Test-Path README.md) {
+            Copy-Item README.md dist/
+          }
+
+          Compress-Archive -Path dist/* -DestinationPath Windows.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows
+          path: Windows.zip
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake glew glfw
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        run: |
+          mkdir -p dist
+
+          cp build/out/beyond dist/ 2>/dev/null || \
+          cp build/out/beyond.app dist/ 2>/dev/null || true
+
+          cp README.md dist/ 2>/dev/null || true
+
+          cd dist
+          zip -r ../macOS.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS
+          path: macOS.zip
+
   release:
-    needs: build
+    needs:
+      - build-linux
+      - build-windows
+      - build-macos
+
     if: startsWith(github.ref, 'refs/tags/v')
+
     runs-on: ubuntu-latest
 
     steps:
