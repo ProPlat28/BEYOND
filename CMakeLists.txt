@@ -20,7 +20,7 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
 find_package(glfw3 3.3 QUIET)
 if(NOT glfw3_FOUND)
-  FetchContent_Declare(glfw URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz)
+  FetchContent_Declare(glew URL https://github.com/Perlmint/glew-cmake/archive/refs/tags/glew-cmake-2.2.0.tar.gz)
   FetchContent_MakeAvailable(glfw)
 endif()
 
