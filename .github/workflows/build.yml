@@ -20,10 +20,14 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libglew-dev \
-            libgl1-mesa-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
-            libasound2-dev libpulse-dev zip
+          sudo apt-get install -y \
+            cmake build-essential \
+            libglew-dev libgl1-mesa-dev \
+            libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev \
+            libxi-dev libxext-dev \
+            libasound2-dev libpulse-dev \
+            zip patchelf
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -33,16 +37,22 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p dist
+          mkdir -p dist/lib
+
           cp build/out/beyond dist/
+          cp /usr/lib/x86_64-linux-gnu/libGLEW.so.2.2 dist/lib/
+
+          patchelf --set-rpath '$ORIGIN/lib' dist/beyond
+
           cp README.md dist/ 2>/dev/null || true
+
           cd dist
-          zip -r ../beyond-linux.zip .
+          zip -r ../Linux.zip .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: beyond-linux
-          path: beyond-linux.zip
+          name: Linux
+          path: Linux.zip
 
   release:
     needs: build
