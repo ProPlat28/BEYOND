@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
 // BEYOND - build the rocket, leave Earth, explore a universe where every world is different.
 // C++20 / OpenGL 3.3 / GLFW / GLEW. All textures and sounds are generated procedurally.
 #include <GL/glew.h>
@@ -307,7 +312,7 @@ static void onCursor(GLFWwindow*, double x, double y) { static double lx = x, ly
 // ---------------------------------------------------------------- update
 // shared first-person walking: returns horizontal speed
 static float walk(float dt, float (*gh)(float, float), float padR, float bound, float grav, float sp0) {
-  float fz = (K(GLFW_KEY_W) || K(GLFW_KEY_UP)) - (K(GLFW_KEY_S) || K(GLFW_KEY_DOWN)), fx = (K(GLFW_KEY_D) || K(GLFW_KEY_RIGHT)) - (K(GLFW_KEY_A) || K(GLFW_KEY_LEFT)), sp = (K(GLFW_KEY_LEFT_SHIFT) ? 9.5f : 5.2f) * sp0;
+  float fz = (float)((K(GLFW_KEY_W) || K(GLFW_KEY_UP)) - (K(GLFW_KEY_S) || K(GLFW_KEY_DOWN))), fx = (float)((K(GLFW_KEY_D) || K(GLFW_KEY_RIGHT)) - (K(GLFW_KEY_A) || K(GLFW_KEY_LEFT))), sp = (K(GLFW_KEY_LEFT_SHIFT) ? 9.5f : 5.2f) * sp0;
   P.yaw -= (float)mdx * .0022f; P.pitch = clampf(P.pitch - (float)mdy * .0022f, -1.5f, 1.5f); mdx = mdy = 0;
   float s = std::sin(P.yaw), c = std::cos(P.yaw), tx = -s * fz + c * fx, tz = -c * fz - s * fx, l = std::hypot(tx, tz); if (l > 0) { tx = tx / l * sp; tz = tz / l * sp; }
   float k = 1 - std::exp(-dt * 10); P.vx += (tx - P.vx) * k; P.vz += (tz - P.vz) * k; P.x += P.vx * dt; P.z += P.vz * dt;

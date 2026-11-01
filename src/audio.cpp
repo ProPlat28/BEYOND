@@ -1,3 +1,11 @@
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_ENCODING
 #define MA_NO_DECODING
@@ -46,7 +54,7 @@ void audioMute(bool m) { muted = m; }
 struct Svf {
   float i1 = 0, i2 = 0;
   void run(float x, float f, float q, float& lp, float& bp, float& hp) {
-    float g = std::tan(3.14159265f * std::min(f, 18000.f) / SR), k = 1.f / q, a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+    float g = std::tan(3.14159265f * (std::min)(f, 18000.f) / SR), k = 1.f / q, a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
     float v3 = x - i2, v1 = a1 * i1 + a2 * v3, v2 = i2 + a2 * i1 + a3 * v3;
     i1 = 2 * v1 - i1; i2 = 2 * v2 - i2; bp = v1; lp = v2; hp = x - k * v1 - v2;
   }
@@ -87,7 +95,7 @@ static void cb(ma_device*, void* out, const void*, ma_uint32 n) {
       Vc& v = vc[i]; if (!v.on) continue;
       if (v.del > 0) { v.del -= dt; continue; }
       float t = v.t / v.dur; if (t >= 1.f) { v.on = false; continue; }
-      float f = v.f0 == v.f1 ? v.f0 : v.f0 * std::pow(v.f1 / v.f0, t), env = std::min(1.f, v.t / .006f) * (1 - t) * (1 - t), x = 0;
+      float f = v.f0 == v.f1 ? v.f0 : v.f0 * std::pow(v.f1 / v.f0, t), env = (std::min)(1.f, v.t / .006f) * (1 - t) * (1 - t), x = 0;
       if (v.kind <= 2) { v.ph += f * dt; v.ph -= std::floor(v.ph);
         x = v.kind == 0 ? std::sin(v.ph * TAU) : v.kind == 1 ? (v.ph < .5f ? 1.f : -1.f) * .7f : (std::fabs(v.ph * 4 - 2) - 1.f); }
       else { float l, b, h; vF[i].run(wn(), f, v.q, l, b, h); x = v.kind == 3 ? b : v.kind == 4 ? l : h; }
