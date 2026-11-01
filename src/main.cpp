@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <cstdarg>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -283,6 +284,9 @@ static void emit(V3 p, V3 dir, float pw, float dt) {
 static void updParts(float dt) { for (auto& f : parts) if (f.l > 0) { f.l -= dt * 1.5f; f.p = f.p + f.v * dt; } }
 static void doJump() { audioEvent(S_WHOOSH); flashA = 1; pendingJump = true; }
 static void interact();
+static void saveGame();
+static void resetGame();
+static bool saveReq = false; static float resetArm = 0;
 static void toggleFS() {
   if (!fs) { glfwGetWindowPos(win, &wx, &wy); glfwGetWindowSize(win, &ww, &wh); const GLFWvidmode* m = glfwGetVideoMode(mon); glfwSetWindowMonitor(win, mon, 0, 0, m->width, m->height, m->refreshRate); }
   else glfwSetWindowMonitor(win, nullptr, wx, wy, ww, wh, 0); fs = !fs;
@@ -294,7 +298,8 @@ static void onKey(GLFWwindow*, int key, int, int act, int) {
   else if (key == GLFW_KEY_M) { muted = !muted; audioMute(muted); }
   else if (key == GLFW_KEY_E) interact();
   else if (key == GLFW_KEY_J && st == SPACE && !paused) doJump();
-  else if (key == GLFW_KEY_ESCAPE) { paused = !paused; glfwSetInputMode(win, GLFW_CURSOR, paused ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED); } // Esc only pauses - it never closes the game
+  else if (key == GLFW_KEY_N && paused) { if (resetArm > 0) { resetGame(); resetArm = 0; paused = false; glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED); } else resetArm = 4; }
+  else if (key == GLFW_KEY_ESCAPE) { paused = !paused; resetArm = 0; if (paused) saveReq = true; glfwSetInputMode(win, GLFW_CURSOR, paused ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED); } // Esc only pauses - it never closes the game
   else if (key == GLFW_KEY_Q && paused) glfwSetWindowShouldClose(win, 1);
 }
 static void onCursor(GLFWwindow*, double x, double y) { static double lx = x, ly = y; static bool first = true; if (first) { lx = x; ly = y; first = false; } if (!paused) { mdx += x - lx; mdy += y - ly; } lx = x; ly = y; }
@@ -505,6 +510,59 @@ static void drawSurface() {
   for (auto& o : objs) if (o.done && o.type == 1) { DP d; d.p = o.pos; d.s = {.6f, 3.5f, .6f}; d.tex = tConc; d.t = {.5f, .55f, .6f}; draw(mCylN, d); DP t; t.p = o.pos + V3{0, 4, 0}; t.s = {.9f, .9f, .9f}; t.t = {.3f, 1, .6f}; t.emis = 4; draw(mSphereLo, t); }
   for (auto& n : npcs) drawNpc(n, p);
 }
+// ================================================================ SAVE SYSTEM (text file in the user's data folder)
+static float savedL = 0;
+static std::string savePath() {
+  namespace sfs = std::filesystem; std::string dir = ".";
+#ifdef _WIN32
+  if (const char* a = std::getenv("APPDATA")) dir = std::string(a) + "/Beyond";
+#elif defined(__APPLE__)
+  if (const char* h = std::getenv("HOME")) dir = std::string(h) + "/Library/Application Support/Beyond";
+#else
+  const char* x = std::getenv("XDG_DATA_HOME"); const char* h = std::getenv("HOME"); if (x) dir = std::string(x) + "/beyond"; else if (h) dir = std::string(h) + "/.local/share/beyond";
+#endif
+  std::error_code ec; sfs::create_directories(dir, ec); return dir + "/save.txt";
+}
+static void saveGame() {
+  if (st == COUNT || st == LAUNCH) return; std::string path = savePath(), tmp = path + ".tmp"; FILE* f = std::fopen(tmp.c_str(), "w"); if (!f) return;
+  std::fprintf(f, "BEYOND_SAVE 1\nstate %d\nsys %d\nfound %d\nmuted %d\n", (int)st, sysId, foundN, muted ? 1 : 0);
+  if (st == EARTH) std::fprintf(f, "earth %.3f %.3f %.4f\n", P.x, P.z, P.yaw);
+  std::fprintf(f, "parts"); for (auto& p : picks) std::fprintf(f, " %d %d", p.got ? 1 : 0, p.inst ? 1 : 0); std::fprintf(f, "\n");
+  if (st != EARTH) std::fprintf(f, "ship %.2f %.2f %.2f %.4f %.4f %.3f\nentry %.2f %.2f %.2f\n", S.pos.x, S.pos.y, S.pos.z, S.yaw, S.pitch, S.thr, spaceEntry.x, spaceEntry.y, spaceEntry.z);
+  if (st == SURFACE && curP >= 0) std::fprintf(f, "cur %d\nsurf %.3f %.3f %.4f %d\n", planets[curP].seed, P.x, P.z, P.yaw, hp);
+  for (auto& p : planets) if (p.qi || p.qph || p.prog || p.mask || (p.found && p.enterable)) std::fprintf(f, "planet %d %d %d %d %u %d\n", p.seed, p.qi, p.qph, p.prog, p.mask, p.found ? 1 : 0);
+  std::fclose(f); std::error_code ec; std::filesystem::rename(tmp, path, ec); savedL = 2.5f;
+}
+static bool loadGame() {
+  FILE* f = std::fopen(savePath().c_str(), "r"); if (!f) return false; char tag[32]; int ver = 0;
+  if (std::fscanf(f, "%31s %d", tag, &ver) != 2 || std::strcmp(tag, "BEYOND_SAVE") != 0) { std::fclose(f); return false; }
+  struct PE { int seed, qi, qph, prog; unsigned mask; int found; }; std::vector<PE> pes;
+  int state = 0, sys = 0, found = 0, mu = 0, cur = 0, g[5] = {0, 0, 0, 0, 0}, in[5] = {0, 0, 0, 0, 0}, hp_ = 3; float ep[3] = {30, 50, .54f}, sh[6] = {0, 0, 0, 0, .3f, .35f}, en[3] = {0, 0, 0}, sf[3] = {7, 7, 0};
+#define RD(...) (void)std::fscanf(f, __VA_ARGS__)
+  while (std::fscanf(f, "%31s", tag) == 1) {
+    if (!std::strcmp(tag, "state")) RD("%d", &state); else if (!std::strcmp(tag, "sys")) RD("%d", &sys); else if (!std::strcmp(tag, "found")) RD("%d", &found); else if (!std::strcmp(tag, "muted")) RD("%d", &mu);
+    else if (!std::strcmp(tag, "earth")) RD("%f %f %f", &ep[0], &ep[1], &ep[2]); else if (!std::strcmp(tag, "parts")) { for (int i = 0; i < 5; i++) RD("%d %d", &g[i], &in[i]); }
+    else if (!std::strcmp(tag, "ship")) RD("%f %f %f %f %f %f", &sh[0], &sh[1], &sh[2], &sh[3], &sh[4], &sh[5]); else if (!std::strcmp(tag, "entry")) RD("%f %f %f", &en[0], &en[1], &en[2]);
+    else if (!std::strcmp(tag, "cur")) RD("%d", &cur); else if (!std::strcmp(tag, "surf")) RD("%f %f %f %d", &sf[0], &sf[1], &sf[2], &hp_);
+    else if (!std::strcmp(tag, "planet")) { PE e{}; RD("%d %d %d %d %u %d", &e.seed, &e.qi, &e.qph, &e.prog, &e.mask, &e.found); pes.push_back(e); }
+  }
+#undef RD
+  std::fclose(f); if (state < 0 || state > 4 || state == COUNT || state == LAUNCH) state = EARTH; if (sys < 0 || sys > 100000) sys = 0;
+  sysId = sys; foundN = std::max(0, found); muted = mu != 0; gotN = instN = 0; for (int i = 0; i < 5; i++) { picks[i].got = g[i] != 0; picks[i].inst = in[i] != 0; gotN += g[i] ? 1 : 0; instN += in[i] ? 1 : 0; }
+  buildSystem(sysId); for (auto& e : pes) for (auto& p : planets) if (p.seed == e.seed) { p.qi = e.qi; p.qph = e.qph; p.prog = e.prog; p.mask = e.mask; p.found = e.found != 0; }
+  if (state == EARTH || state == COUNT) { P = Player(); P.x = ep[0]; P.z = ep[1]; P.yaw = ep[2]; P.y = hAt(P.x, P.z); st = EARTH; return true; }
+  st = SPACE; ambient = {.012f, .012f, .018f}; fogDen = 0; nearZ = 2; S = Ship(); S.pos = {sh[0], sh[1], sh[2]}; S.yaw = sh[3]; S.pitch = sh[4]; S.thr = clampf(sh[5], 0, 1); S.cyaw = S.yaw; S.cpitch = S.pitch; S.speed = S.thr * 900;
+  V3 r, u, fw; basis(S.yaw, S.pitch, 0, r, u, fw); camPos = S.pos + fw * -26.f + u * 5.f; cR = r; cU = u; cF = fw;
+  if (state == SURFACE && cur) for (int i = 0; i < (int)planets.size(); i++) if (planets[i].seed == cur) { S.pos = {en[0], en[1], en[2]}; enterPlanet(i); P.x = sf[0]; P.z = sf[1]; P.yaw = sf[2]; P.y = shAt(P.x, P.z) + .5f; hp = hp_ > 0 ? hp_ : 3; break; }
+  return true;
+}
+static void resetGame() {
+  std::error_code ec; std::filesystem::remove(savePath(), ec);
+  if (st == SURFACE) { freeMesh(mSurf); if (tSurf) { glDeleteTextures(1, &tSurf); tSurf = 0; } npcs.clear(); objs.clear(); curP = -1; }
+  st = EARTH; gotN = instN = 0; for (auto& p : picks) { p.got = false; p.inst = false; } P = Player(); P.y = hAt(P.x, P.z); S = Ship(); sysId = 0; foundN = 0; rocketY = .9f; cd = 0; vyL = 0; parts.clear(); partI = 0; flashA = 1; talkL = 0;
+  fogDen = .0035f; ambient = {.3f, .36f, .45f}; fogCol = {.28f, .55f, 1.f}; fov = 72; nearZ = .3f; buildSystem(0); toast("NEW GAME\nSave erased - build the rocket and leave Earth", 6);
+}
+static int sigOf() { long long s = (long long)st * 1000003LL + sysId * 131 + foundN * 37 + gotN * 41 + instN * 43 + curP * 101; for (auto& p : planets) s += p.qi * 13 + p.qph * 7 + p.prog * 5 + (long long)p.mask * 3 + (p.found ? 17 : 0); return (int)(s ^ (s >> 32)); }
 static void render() {
   glfwGetFramebufferSize(win, &FW, &FH); if (FW < 1 || FH < 1) return; glViewport(0, 0, FW, FH); makeVP();
   float t = st == LAUNCH ? clampf(rocketY / 800, 0, 1) : st == SPACE ? 1.f : 0.f; V3 bse = st == SURFACE ? surfSky : fogCol; V3 sky{lerpf(bse.x, 0, t), lerpf(bse.y, 0, t), lerpf(bse.z, 0, t)};
@@ -563,13 +621,14 @@ static void render() {
     std::string t = talkT, line; float y = by + 14 + 14 * sc * 1.4f; size_t maxc = (size_t)(bw / (6.f * sc * 1.2f)); size_t pos = 0;
     while (pos < t.size()) { size_t e = std::min(t.size(), pos + maxc); if (e < t.size()) { size_t sp = t.rfind(' ', e); if (sp != std::string::npos && sp > pos) e = sp; } text(t.substr(pos, e - pos), bx + 16, y, sc * 1.2f, w); y += 12 * sc * 1.2f; pos = e + (e < t.size() && t[e] == ' ' ? 1 : 0); }
     text("[E] close", bx + bw - 140, by + bh - 14 * sc, sc, dim, .7f); }
+  if (savedL > 0) { std::string sv = "Progress saved"; text(sv, FW - stb_easy_font_width((char*)sv.c_str()) * sc - 22, FH - 26.f * sc - 10, sc, {.6f, 1, .7f}, clampf(savedL, 0, 1) * .9f); }
   if (flashA > 0) rect(0, 0, (float)FW, (float)FH, w, flashA);
-  if (paused) { rect(0, 0, (float)FW, (float)FH, {0, 0, .02f}, .65f); textC("PAUSED", FW / 2.f, FH * .35f, sc * 4, w); textC("Esc resume   |   F fullscreen   |   M mute   |   Q quit", FW / 2.f, FH * .5f, sc * 1.3f, dim); }
+  if (paused) { rect(0, 0, (float)FW, (float)FH, {0, 0, .02f}, .65f); textC("PAUSED", FW / 2.f, FH * .35f, sc * 4, w); textC("Esc resume   |   F fullscreen   |   M mute   |   N new game   |   Q save and quit", FW / 2.f, FH * .5f, sc * 1.3f, dim); textC(resetArm > 0 ? "Press N again to ERASE your save and start over" : "Your progress is saved automatically", FW / 2.f, FH * .58f, sc * 1.3f, resetArm > 0 ? V3{1, .4f, .3f} : V3{.6f, 1, .7f}); }
   glEnable(GL_DEPTH_TEST); glDepthMask(GL_TRUE);
 }
 // ---------------------------------------------------------------- main
 int main(int argc, char** argv) {
-  bool windowed = false; for (int i = 1; i < argc; i++) if (!std::strcmp(argv[i], "--windowed")) windowed = true;
+  bool windowed = false, newGame = false; for (int i = 1; i < argc; i++) { if (!std::strcmp(argv[i], "--windowed")) windowed = true; if (!std::strcmp(argv[i], "--new")) newGame = true; }
   if (!glfwInit()) { std::fprintf(stderr, "GLFW init failed\n"); return 1; }
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3); glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); glfwWindowHint(GLFW_SAMPLES, 4);
   mon = glfwGetPrimaryMonitor(); const GLFWvidmode* vm = glfwGetVideoMode(mon); fs = !windowed;
@@ -600,15 +659,17 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 70; i++) { float x = (r.f() - .5f) * 440, z = (r.f() - .5f) * 440; if (std::hypot(x, z) < 30) continue; rocks.push_back({x, z, .6f + r.f() * 2.5f, .5f + r.f() * 1.6f, .6f + r.f() * 2.5f}); } }
   const char* names[5] = {"HULL", "FUEL BOOSTERS", "ENGINE", "GUIDANCE COMPUTER", "LANDING FINS"}; V3 cols[5] = {{1, 1, 1}, {1, .3f, .04f}, {.1f, .6f, 1}, {.35f, 1, .2f}, {1, .1f, .35f}};
   for (int i = 0; i < 5; i++) { Rng r{(unsigned)(77 + i)}; float a = i / 5.f * 6.283f + r.f() * .9f, d = 70 + r.f() * 95, x = std::cos(a) * d, z = std::sin(a) * d; picks[i].pos = {x, hAt(x, z) + 1.5f, z}; picks[i].col = cols[i]; picks[i].name = names[i]; }
-  P.y = hAt(P.x, P.z); buildSystem(0); sunDir = norm({.5f, .45f, .35f});
-  audioInit(); toast("BEYOND\nBuild the rocket. Leave Earth. Discover a universe that has never existed.\nWASD/ZQSD move  |  mouse look  |  Shift sprint  |  Space jump  |  E interact  |  F fullscreen  |  M mute  |  Esc pause", 9);
-  double last = glfwGetTime();
+  P.y = hAt(P.x, P.z); if (newGame) { std::error_code ec; std::filesystem::remove(savePath(), ec); }
+  bool loaded = !newGame && loadGame(); if (!loaded) { buildSystem(0); sunDir = norm({.5f, .45f, .35f}); }
+  audioInit(); audioMute(muted); if (loaded) toast("WELCOME BACK\nYour progress was restored - " + std::to_string(foundN) + " worlds discovered", 6); else toast("BEYOND\nBuild the rocket. Leave Earth. Discover a universe that has never existed.\nWASD/ZQSD move  |  mouse look  |  Shift sprint  |  Space jump  |  E interact  |  F fullscreen  |  M mute  |  Esc pause", 9);
+  double last = glfwGetTime(); float sinceSave = 0; int lastSig = sigOf();
   while (!glfwWindowShouldClose(win)) {
     glfwPollEvents(); double now = glfwGetTime(); float dt = (float)std::min(.05, now - last); last = now;
     if (!paused) { tAcc += dt; if (st == EARTH) updEarth(dt); else if (st == COUNT || st == LAUNCH) updLaunch(dt); else if (st == SURFACE) updSurface(dt); else updSpace(dt); updParts(dt); if (toastL > 0) toastL -= dt; }
-    if (flashA > 0) flashA = std::max(0.f, flashA - dt * 1.2f);
+    if (flashA > 0) flashA = std::max(0.f, flashA - dt * 1.2f); if (savedL > 0) savedL -= dt; if (resetArm > 0) resetArm -= dt;
+    sinceSave += dt; { int sg = sigOf(); if (saveReq || (sg != lastSig && sinceSave > 1.f) || (sinceSave > 15.f && !paused)) { saveGame(); lastSig = sg; sinceSave = 0; saveReq = false; } }
     render(); glfwSwapBuffers(win);
     if (pendingJump) { pendingJump = false; buildSystem(++sysId); S.pos = {0, 0, 0}; camPos = S.pos; toast("HYPERJUMP\nStar system " + std::to_string(sysId) + " - everything here is new", 6); }
   }
-  audioShutdown(); glfwTerminate(); return 0;
+  saveGame(); audioShutdown(); glfwTerminate(); return 0;
 }
