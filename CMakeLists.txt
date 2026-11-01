@@ -49,7 +49,9 @@ else()
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
 
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     FetchContent_MakeAvailable(glew)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
 
     set(GLEW_TARGET libglew_static)
 endif()
