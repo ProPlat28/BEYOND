@@ -1,9 +1,11 @@
+
 name: Build BEYOND
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
@@ -11,24 +13,36 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
+
+  # =========================
+  # LINUX
+  # =========================
+  linux:
     name: Linux
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install Linux dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake build-essential \
-            libglew-dev libgl1-mesa-dev \
-            libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev \
-            libxi-dev libxext-dev \
-            libasound2-dev libpulse-dev \
-            zip patchelf
+            cmake \
+            build-essential \
+            libglew-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxext-dev \
+            libasound2-dev \
+            libpulse-dev \
+            zip \
+            patchelf
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -40,30 +54,44 @@ jobs:
         run: |
           mkdir -p dist/lib
 
-          cp build/out/beyond dist/
-          cp /usr/lib/x86_64-linux-gnu/libGLEW.so.2.2 dist/lib/
+          cp build/out/beyond dist/BEYOND
 
-          patchelf --set-rpath '$ORIGIN/lib' dist/beyond
+          GLEW_PATH=$(ldconfig -p | awk '/libGLEW.so.2.2 / {print $NF; exit}')
+
+          if [ -z "$GLEW_PATH" ]; then
+            echo "GLEW library not found!"
+            exit 1
+          fi
+
+          cp -L "$GLEW_PATH" dist/lib/libGLEW.so.2.2
+
+          patchelf --set-rpath '$ORIGIN/lib' dist/BEYOND
 
           cp README.md dist/ 2>/dev/null || true
 
           cd dist
-          zip -r ../Linux.zip .
+          zip -r ../BEYOND-Linux.zip .
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload Linux
+        uses: actions/upload-artifact@v4
         with:
-          name: Linux
-          path: Linux.zip
+          name: BEYOND-Linux
+          path: BEYOND-Linux.zip
 
-  build-windows:
+
+  # =========================
+  # WINDOWS
+  # =========================
+  windows:
     name: Windows
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -A x64
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -73,35 +101,43 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
 
-          Copy-Item build/out/Release/beyond.exe dist/
+          $exe = Get-ChildItem build -Filter beyond.exe -File -Recurse |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            Write-Error "beyond.exe was not found!"
+            Get-ChildItem build -Recurse
+            exit 1
+          }
+
+          Copy-Item $exe.FullName dist/BEYOND.exe
+
           if (Test-Path README.md) {
             Copy-Item README.md dist/
           }
 
-          Compress-Archive -Path dist/* -DestinationPath Windows.zip -Force
+          Compress-Archive -Path dist/* -DestinationPath BEYOND-Windows.zip -Force
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload Windows
+        uses: actions/upload-artifact@v4
         with:
-          name: Windows
-          path: Windows.zip
+          name: BEYOND-Windows
+          path: BEYOND-Windows.zip
 
-  build-macos:
-    name: Build macOS
+
+  # =========================
+  # MACOS
+  # =========================
+  macos:
+    name: macOS
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          brew update
-          brew install cmake glew glfw
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Configure
-        run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -110,35 +146,42 @@ jobs:
         run: |
           mkdir -p dist
 
-          cp build/out/beyond dist/ 2>/dev/null || \
-          cp build/out/beyond.app dist/ 2>/dev/null || true
+          cp build/out/beyond dist/BEYOND
 
           cp README.md dist/ 2>/dev/null || true
 
           cd dist
-          zip -r ../macOS.zip .
+          zip -r ../BEYOND-macOS.zip .
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload macOS
+        uses: actions/upload-artifact@v4
         with:
-          name: macOS
-          path: macOS.zip
+          name: BEYOND-macOS
+          path: BEYOND-macOS.zip
 
+
+  # =========================
+  # RELEASE
+  # =========================
   release:
-    needs:
-      - build-linux
-      - build-windows
-      - build-macos
-
+    name: Create GitHub Release
+    needs: [linux, windows, macos]
     if: startsWith(github.ref, 'refs/tags/v')
-
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all builds
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: Initial Release
           files: artifacts/*.zip
+          draft: false
+          prerelease: false
