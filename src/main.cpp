@@ -4,9 +4,8 @@
 #endif
 #endif
 // BEYOND - build the rocket, leave Earth, explore a universe where every world is different.
-// C++20 / OpenGL 3.3 / GLFW / GLEW. All textures and sounds are generated procedurally.
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
+// C++20 / OpenGL 3.3 / GLFW (built-in GL loader, no GLEW needed). All textures and sounds are generated procedurally.
+#include "gl_min.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -639,7 +638,7 @@ int main(int argc, char** argv) {
   mon = glfwGetPrimaryMonitor(); const GLFWvidmode* vm = glfwGetVideoMode(mon); fs = !windowed;
   win = fs ? glfwCreateWindow(vm->width, vm->height, "BEYOND", mon, nullptr) : glfwCreateWindow(1280, 720, "BEYOND", nullptr, nullptr);
   if (!win) { std::fprintf(stderr, "Window creation failed (OpenGL 3.3 required)\n"); return 1; }
-  glfwMakeContextCurrent(win); glfwSwapInterval(1); glewExperimental = GL_TRUE; if (glewInit() != GLEW_OK) { std::fprintf(stderr, "GLEW init failed\n"); return 1; }
+  glfwMakeContextCurrent(win); glfwSwapInterval(1); if (!glLoad()) { std::fprintf(stderr, "OpenGL 3.3 functions could not be loaded\n"); return 1; }
   glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED); if (glfwRawMouseMotionSupported()) glfwSetInputMode(win, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
   glfwSetKeyCallback(win, onKey); glfwSetCursorPosCallback(win, onCursor);
   glEnable(GL_FRAMEBUFFER_SRGB); glEnable(GL_MULTISAMPLE);
