@@ -1,0 +1,2 @@
+// Windows resources: the icon shown for beyond.exe in Explorer, the taskbar and alt-tab
+IDI_ICON1 ICON "../assets/icon/beyond.ico"
