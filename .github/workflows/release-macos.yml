@@ -1,0 +1,55 @@
+name: Release macOS
+
+# Builds BEYOND on a Mac and attaches BEYOND-macOS.zip to a release.
+on:
+  push:
+    branches: [ccr-57b460fb-yqo9ln]
+    paths: ['.github/workflows/release-macos.yml', 'src/**', 'CMakeLists.txt']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the macOS build to
+        default: v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      TAG: ${{ inputs.tag || 'v1.0.0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        # one universal binary for Apple Silicon and Intel Macs, GLFW built in, no developer tools
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBEYOND_PORTABLE=ON
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        # same layout as BEYOND-Linux.zip: README.md, beyond, assets/
+        run: |
+          lipo -info build/out/beyond
+          mkdir -p dist/BEYOND-macOS
+          cp README.md dist/BEYOND-macOS/
+          cp -R build/out/beyond build/out/assets dist/BEYOND-macOS/
+          (cd dist && zip -r -y ../BEYOND-macOS.zip BEYOND-macOS)
+          unzip -l BEYOND-macOS.zip | grep -v assets/audio/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BEYOND-macOS
+          path: BEYOND-macOS.zip
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" BEYOND-macOS.zip --clobber --repo "$GITHUB_REPOSITORY"
