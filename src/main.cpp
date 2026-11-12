@@ -21,8 +21,22 @@ int main(int argc, char** argv) {
     char self[4096]; ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     if (n > 0) { self[n] = 0; std::vector<char*> av{(char*)"distrobox-host-exec", (char*)"env", (char*)"BEYOND_IN_HOST=1", self}; for (int i = 1; i < argc; i++) av.push_back(argv[i]); av.push_back(nullptr);
       execv("/usr/bin/distrobox-host-exec", av.data()); } }
-  glfwInitHint(0x00050003 /* GLFW_PLATFORM */, 0x00060004 /* GLFW_PLATFORM_X11 */);   // GLFW 3.4 on Wayland: use XWayland, the native Wayland window can stay invisible (ignored by GLFW 3.3)
-  if (!glfwInit()) { std::fprintf(stderr, "GLFW init failed\n"); return 1; }
+  #elif defined(__linux__)
+    glfwInitHint(0x00050003 /* GLFW_PLATFORM */, 0x00060004 /* GLFW_PLATFORM_X11 */);  // GLFW 3.4 on Wayland: use XWayland, the native Wayland window can stay invisible (ignored by GLFW 3.3)
+  #elif defined(__APPLE__)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA);
+  #elif defined(_WIN32)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
+  #endif
+glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA); // Use GLFW_PLATFORM_COCOA for MacOS
+  // Added custom GLFW error logging
+  if (!glfwInit()) { const char* description = nullptr;
+    int code = glfwGetError(&description);
+
+    fprintf(stderr, "GLFW error %d: %s\n",
+            code,
+            description ? description : "Unknown error");
+    return 1; }
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3); glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); glfwWindowHint(GLFW_SAMPLES, 4);
   mon = glfwGetPrimaryMonitor(); const GLFWvidmode* vm = glfwGetVideoMode(mon); fs = !windowed;
   // the window stays hidden while everything loads, and appears directly on the main menu (fullscreen is applied when it is shown)
