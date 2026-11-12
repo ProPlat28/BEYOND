@@ -16,19 +16,18 @@ static int musicNow() {
 // ---------------------------------------------------------------- main
 int main(int argc, char** argv) {
   bool windowed = false; int testEnd = 0; for (int i = 1; i < argc; i++) if (!std::strcmp(argv[i], "--windowed")) windowed = true; else if (!std::strcmp(argv[i], "--test-ending")) { windowed = true; testEnd = 1; } else if (!std::strcmp(argv[i], "--test-moons")) { windowed = true; testEnd = 2; } else if (!std::strcmp(argv[i], "--make-ending-outro")) { windowed = true; testEnd = 3; } else if (!std::strcmp(argv[i], "--make-developer-world")) { windowed = true; testEnd = 4; }   // testing mode: windowed, straight into the ending, nothing saved
+  #if defined(__linux__)
   // started inside a distrobox/toolbox container (no GPU driver there = software rendering, slow and hot): run again on the host instead
   if (!std::getenv("BEYOND_IN_HOST") && access("/run/.containerenv", F_OK) == 0 && access("/usr/bin/distrobox-host-exec", X_OK) == 0) {
     char self[4096]; ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     if (n > 0) { self[n] = 0; std::vector<char*> av{(char*)"distrobox-host-exec", (char*)"env", (char*)"BEYOND_IN_HOST=1", self}; for (int i = 1; i < argc; i++) av.push_back(argv[i]); av.push_back(nullptr);
       execv("/usr/bin/distrobox-host-exec", av.data()); } }
-  #elif defined(__linux__)
     glfwInitHint(0x00050003 /* GLFW_PLATFORM */, 0x00060004 /* GLFW_PLATFORM_X11 */);  // GLFW 3.4 on Wayland: use XWayland, the native Wayland window can stay invisible (ignored by GLFW 3.3)
   #elif defined(__APPLE__)
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA);
   #elif defined(_WIN32)
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
   #endif
-glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA); // Use GLFW_PLATFORM_COCOA for MacOS
   // Added custom GLFW error logging
   if (!glfwInit()) { const char* description = nullptr;
     int code = glfwGetError(&description);
