@@ -16,3 +16,5 @@
 Create a universe where every planet is different and every journey brings something new.
 
 **Start with nothing. Build your rocket. Discover BEYOND.**
+## 🙌 Special Thanks
+Special Thanks to my friend d4shy (For his ideas) and my dad (For making songs)!
